@@ -13,9 +13,14 @@
         .setting { margin-bottom: 20px; }
         label { display: block; margin-bottom: 8px; font-weight: bold; }
         input[type="file"] { background: #3d3d3d; width: 100%; padding: 10px; border-radius: 8px; border: 1px dashed #666; color: white; }
-        button { background: var(--primary); color: #000; border: none; padding: 15px; border-radius: 10px; cursor: pointer; width: 100%; font-size: 1.1em; font-weight: bold; transition: 0.2s; }
+        input[type="number"] { background: white; color: black; font-size: 1.1em; }
+        
+        .btn-calc { background: var(--primary); color: #000; border: none; padding: 15px; border-radius: 10px; cursor: pointer; width: 100%; font-size: 1.1em; font-weight: bold; transition: 0.2s; }
+        .btn-export { background: #4caf50; color: white; border: none; padding: 15px; border-radius: 10px; cursor: pointer; width: 100%; font-size: 1.1em; font-weight: bold; transition: 0.2s; margin-top: 15px; display: none; }
         button:active { transform: scale(0.98); opacity: 0.8; }
-        #status { margin-top: 20px; text-align: center; font-weight: bold; color: #4caf50; }
+        
+        .result-box { margin-top: 20px; padding: 15px; background: #333; border-radius: 8px; display: none; text-align: center; }
+        .highlight { color: #ff9800; font-size: 1.3em; font-weight: bold; }
         small { color: #888; display: block; margin-top: 4px; }
     </style>
 </head>
@@ -24,7 +29,7 @@
 <div class="card">
     <h2>🛸 DJI 航線轉檔器</h2>
     <div class="warning">
-        ⚠️ <b>注意：</b> 本工具生成的 KML 僅供「地圖參考」，請勿在 DJI APP 中點擊「開始執行」自動航線，以免發生撞山危險。
+        ⚠️ <b>注意：</b> 本工具生成的 KML 僅供「地圖參考」，請勿在 DJI APP 中點擊「開始執行」自動航線。
     </div>
     
     <div class="setting">
@@ -35,30 +40,52 @@
     <div class="setting">
         <label>2. 抽稀靈敏度</label>
         <input type="number" id="epsilon" value="0.0005" step="0.0001" style="width: 100%; padding: 10px; border-radius: 5px; border:none;">
-        <small>數字越大點越少。0.0005 = 約 50m 誤差 (推薦)</small>
-        
+        <small>數字越大點越少。0.0005 = 約 50m 誤差</small>
     </div>
 
-    <button onclick="processFile()">轉換並輸出 KML</button>
-    <div id="status"></div>
+    <button id="calcBtn" class="btn-calc" onclick="calculatePoints()">1. 計算並預覽點數</button>
+
+    <div id="resultBox" class="result-box">
+        <div id="statusText"></div>
+    </div>
+
+    <button id="exportBtn" class="btn-export" onclick="exportKML()">2. 點數滿意！分享 / 匯出</button>
 </div>
 
 <script>
-    // 加上 async 確保整體流程是一氣呵成的
-    async function processFile() {
-        const fileInput = document.getElementById('fileInput');
-        const status = document.getElementById('status');
-        const epsilon = parseFloat(document.getElementById('epsilon').value);
+    // 全域變數，用來暫存準備要匯出的檔案資料
+    let readyKmlFile = null;
+    let readyFileName = "";
+    let readyBlob = null;
 
-        if (!fileInput.files.length) { alert("請先選擇檔案"); return; }
+    // 如果使用者重新選檔案或改數字，就隱藏匯出按鈕，強迫重新計算
+    document.getElementById('fileInput').addEventListener('change', resetUI);
+    document.getElementById('epsilon').addEventListener('input', resetUI);
+
+    function resetUI() {
+        document.getElementById('exportBtn').style.display = 'none';
+        document.getElementById('resultBox').style.display = 'none';
+        readyKmlFile = null;
+    }
+
+    // --- 步驟一：讀取檔案與計算 ---
+    async function calculatePoints() {
+        const fileInput = document.getElementById('fileInput');
+        const epsilon = parseFloat(document.getElementById('epsilon').value);
+        const resultBox = document.getElementById('resultBox');
+        const statusText = document.getElementById('statusText');
+        const exportBtn = document.getElementById('exportBtn');
+
+        if (!fileInput.files.length) { alert("請先選擇 GPX 檔案！"); return; }
         
-        status.innerText = "⏳ 處理中...";
+        statusText.innerHTML = "⏳ 計算中...";
+        resultBox.style.display = 'block';
+        exportBtn.style.display = 'none';
+        
         const file = fileInput.files[0];
 
         try {
-            // 關鍵修改：改用 text() 直接非同步讀取，取代 FileReader 避開 Safari 阻擋
             const content = await file.text();
-            
             const parser = new DOMParser();
             const xmlDoc = parser.parseFromString(content, "text/xml");
             let coords = [];
@@ -71,9 +98,12 @@
                 coords.push({lon, lat, ele});
             }
 
-            if (!coords.length) { alert("無效 GPX"); status.innerText = ""; return; }
+            if (!coords.length) { 
+                statusText.innerHTML = "❌ 檔案內無效的 GPX 軌跡"; 
+                return; 
+            }
 
-            // 智慧抽稀 (RDP 簡化邏輯)
+            // 智慧抽稀演算法
             let simplified = [coords[0]];
             for (let i = 1; i < coords.length; i++) {
                 const last = simplified[simplified.length - 1];
@@ -83,52 +113,67 @@
             }
             if (coords.length > 1) simplified.push(coords[coords.length-1]);
 
-            // 生成 KML 字串
+            // 準備 KML 內容
             const coordStr = simplified.map(c => `${c.lon},${c.lat},${c.ele}`).join("\n");
             const kmlBody = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>DJI_READY</name><Style id="s"><LineStyle><color>ff00ffff</color><width>6</width></LineStyle></Style><Placemark><name>⚠️手動參考線(勿點執行)</name><styleUrl>#s</styleUrl><LineString><tessellate>1</tessellate><altitudeMode>clampToGround</altitudeMode><coordinates>${coordStr}</coordinates></LineString></Placemark></Document></kml>`;
 
-            const fileName = `${file.name.replace('.gpx','')}.kml`;
-            const blob = new Blob([kmlBody], {type: 'application/vnd.google-earth.kml+xml'});
-            const kmlFile = new File([blob], fileName, { type: "application/vnd.google-earth.kml+xml" });
+            readyFileName = `DJI_REF_${file.name.replace('.gpx','')}.kml`;
+            readyBlob = new Blob([kmlBody], {type: 'application/vnd.google-earth.kml+xml'});
+            readyKmlFile = new File([readyBlob], readyFileName, { type: "application/vnd.google-earth.kml+xml" });
 
-            const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-
-            // 針對手機端 (LINE 與 Safari) 的原生分享處理
-            if (isMobile && navigator.share && navigator.canShare && navigator.canShare({ files: [kmlFile] })) {
-                try {
-                    await navigator.share({
-                        files: [kmlFile],
-                        title: "匯出 DJI 航線",
-                        text: "這是優化過後的 DJI 參考航線檔案"
-                    });
-                    status.innerText = `✅ 轉換並分享成功！點數：${simplified.length}`;
-                    return; 
-                } catch (err) {
-                    // 處理使用者手動按取消分享的狀況，不把它當作錯誤
-                    if (err.name === 'AbortError') {
-                        status.innerText = `✅ 轉換完成！點數：${simplified.length} (取消分享)`;
-                        return;
-                    }
-                    console.warn("分享面板呼叫失敗，改用傳統下載:", err);
-                }
-            }
-
-            // 備用方案：傳統下載 (針對電腦版、或不支援分享的手機環境)
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url); // 釋放記憶體
+            // 顯示計算結果，提示使用者
+            statusText.innerHTML = `
+                原始點數：${coords.length} 點<br>
+                壓縮後剩餘：<span class="highlight">${simplified.length}</span> 點<br>
+                <small style="margin-top:10px; color:#aaa;">(若覺得點數太多，請調大靈敏度後再次點擊計算)</small>
+            `;
             
-            status.innerText = `✅ 轉換並下載成功！點數：${simplified.length}`;
+            // 顯示第二步的分享按鈕
+            exportBtn.style.display = 'block';
 
         } catch (error) {
-            console.error("轉換錯誤:", error);
-            status.innerText = "❌ 轉換失敗: " + error.message;
+            console.error(error);
+            statusText.innerHTML = "❌ 計算失敗: " + error.message;
         }
+    }
+
+    // --- 步驟二：觸發分享面板 (Safari 最愛這種乾淨的同步點擊) ---
+    async function exportKML() {
+        if (!readyKmlFile) return;
+        
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        const statusText = document.getElementById('statusText');
+
+        // 手機端優先使用原生分享面板
+        if (isMobile && navigator.share && navigator.canShare && navigator.canShare({ files: [readyKmlFile] })) {
+            try {
+                await navigator.share({
+                    files: [readyKmlFile],
+                    title: "匯出 DJI 航線",
+                    text: "DJI 參考航線檔案"
+                });
+                statusText.innerHTML += "<br><span style='color:#4caf50;'>✅ 已成功喚起分享面板！</span>";
+                return;
+            } catch (err) {
+                if (err.name === 'AbortError') {
+                    // 使用者自己按了取消分享，不算錯誤
+                    return;
+                }
+                console.warn("分享面板呼叫失敗，改用傳統下載:", err);
+            }
+        }
+
+        // 桌機版或手機分享失敗的備用下載方案
+        const url = URL.createObjectURL(readyBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = readyFileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        statusText.innerHTML += "<br><span style='color:#4caf50;'>✅ 檔案已下載！</span>";
     }
 </script>
 </body>
