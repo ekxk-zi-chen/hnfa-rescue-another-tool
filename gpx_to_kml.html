@@ -87,7 +87,7 @@
             const coordStr = simplified.map(c => `${c.lon},${c.lat},${c.ele}`).join("\n");
             const kmlBody = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>DJI_READY</name><Style id="s"><LineStyle><color>ff00ffff</color><width>6</width></LineStyle></Style><Placemark><name>⚠️手動參考線(勿點執行)</name><styleUrl>#s</styleUrl><LineString><tessellate>1</tessellate><altitudeMode>clampToGround</altitudeMode><coordinates>${coordStr}</coordinates></LineString></Placemark></Document></kml>`;
 
-            const fileName = `DJI_REF_${file.name.replace('.gpx','')}.kml`;
+            const fileName = `${file.name.replace('.gpx','')}.kml`;
             const blob = new Blob([kmlBody], {type: 'application/vnd.google-earth.kml+xml'});
             const kmlFile = new File([blob], fileName, { type: "application/vnd.google-earth.kml+xml" });
 
