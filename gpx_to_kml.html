@@ -38,7 +38,7 @@
         <small>數字越大點越少。0.0005 = 約 50m 誤差 (推薦)</small>
     </div>
 
-    <button onclick="processFile()">轉換並下載 KML</button>
+    <button onclick="processFile()">轉換並輸出 KML</button>
     <div id="status"></div>
 </div>
 
@@ -50,46 +50,86 @@
 
         if (!fileInput.files.length) { alert("請先選擇檔案"); return; }
         
+        status.innerText = "⏳ 處理中...";
         const file = fileInput.files[0];
         const reader = new FileReader();
 
-        reader.onload = function(e) {
-            const parser = new DOMParser();
-            const xmlDoc = parser.parseFromString(e.target.result, "text/xml");
-            let coords = [];
-            const trkpts = xmlDoc.getElementsByTagName("trkpt");
-            
-            for (let i = 0; i < trkpts.length; i++) {
-                const lat = trkpts[i].getAttribute("lat");
-                const lon = trkpts[i].getAttribute("lon");
-                const ele = trkpts[i].getElementsByTagName("ele")[0]?.textContent || "0";
-                coords.push({lon, lat, ele});
+        // 🌟 關鍵修改：加上 async 以支援 navigator.share 的 await
+        reader.onload = async function(e) {
+            try {
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(e.target.result, "text/xml");
+                let coords = [];
+                const trkpts = xmlDoc.getElementsByTagName("trkpt");
+                
+                for (let i = 0; i < trkpts.length; i++) {
+                    const lat = trkpts[i].getAttribute("lat");
+                    const lon = trkpts[i].getAttribute("lon");
+                    const ele = trkpts[i].getElementsByTagName("ele")[0]?.textContent || "0";
+                    coords.push({lon, lat, ele});
+                }
+
+                if (!coords.length) { alert("無效 GPX"); status.innerText = ""; return; }
+
+                // 智慧抽稀 (RDP 簡化邏輯)
+                let simplified = [coords[0]];
+                for (let i = 1; i < coords.length; i++) {
+                    const last = simplified[simplified.length - 1];
+                    const curr = coords[i];
+                    const dist = Math.sqrt(Math.pow(curr.lon - last.lon, 2) + Math.pow(curr.lat - last.lat, 2));
+                    if (dist > epsilon) simplified.push(curr);
+                }
+                if (coords.length > 1) simplified.push(coords[coords.length-1]);
+
+                // 生成 KML 字串
+                const coordStr = simplified.map(c => `${c.lon},${c.lat},${c.ele}`).join("\n");
+                const kmlBody = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>DJI_READY</name><Style id="s"><LineStyle><color>ff00ffff</color><width>6</width></LineStyle></Style><Placemark><name>⚠️手動參考線(勿點執行)</name><styleUrl>#s</styleUrl><LineString><tessellate>1</tessellate><altitudeMode>clampToGround</altitudeMode><coordinates>${coordStr}</coordinates></LineString></Placemark></Document></kml>`;
+
+                const fileName = `DJI_REF_${file.name.replace('.gpx','')}.kml`;
+                const blob = new Blob([kmlBody], {type: 'application/vnd.google-earth.kml+xml'});
+                
+                // 🔹 定義是否為手機
+                const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+                // 🌟 新增邏輯：手機端優先嘗試分享面板
+                if (isMobile && navigator.share) {
+                    try {
+                        // navigator.share 需要真正的 File 物件，不能只塞 Blob
+                        const kmlFile = new File([blob], fileName, { 
+                            type: "application/vnd.google-earth.kml+xml" 
+                        });
+                        
+                        await navigator.share({
+                            files: [kmlFile],
+                            title: "匯出 DJI 航線",
+                            text: "這是優化過後的 DJI 參考航線檔案"
+                        });
+                        status.innerText = `✅ 轉換並分享成功！點數：${simplified.length}`;
+                        return; // 分享成功就結束，不往下跑傳統下載
+                    } catch (err) {
+                        console.warn("分享面板呼叫失敗，改用傳統下載:", err);
+                        // 如果使用者按取消，或環境不支援分享檔案，就會繼續執行下面的傳統下載
+                    }
+                }
+
+                // 🌟 桌機版或分享失敗的備用方案 (傳統連結下載)
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url); // 釋放記憶體
+                
+                status.innerText = `✅ 轉換並下載成功！點數：${simplified.length}`;
+
+            } catch (error) {
+                console.error("轉換錯誤:", error);
+                status.innerText = "❌ 轉換失敗: " + error.message;
             }
-
-            if (!coords.length) { alert("無效 GPX"); return; }
-
-            // 智慧抽稀 (RDP 簡化邏輯)
-            let simplified = [coords[0]];
-            for (let i = 1; i < coords.length; i++) {
-                const last = simplified[simplified.length - 1];
-                const curr = coords[i];
-                const dist = Math.sqrt(Math.pow(curr.lon - last.lon, 2) + Math.pow(curr.lat - last.lat, 2));
-                if (dist > epsilon) simplified.push(curr);
-            }
-            if (coords.length > 1) simplified.push(coords[coords.length-1]);
-
-            // 生成 KML
-            const coordStr = simplified.map(c => `${c.lon},${c.lat},${c.ele}`).join("\n");
-            const kmlBody = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>DJI_READY</name><Style id="s"><LineStyle><color>ff00ffff</color><width>6</width></LineStyle></Style><Placemark><name>⚠️手動參考線(勿點執行)</name><styleUrl>#s</styleUrl><LineString><tessellate>1</tessellate><altitudeMode>clampToGround</altitudeMode><coordinates>${coordStr}</coordinates></LineString></Placemark></Document></kml>`;
-
-            const blob = new Blob([kmlBody], {type: 'application/vnd.google-earth.kml+xml'});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `DJI_REF_${file.name.replace('.gpx','')}.kml`;
-            a.click();
-            status.innerText = "✅ 轉換成功！點數：" + simplified.length;
         };
+        
         reader.readAsText(file);
     }
 </script>
