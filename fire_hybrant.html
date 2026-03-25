@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>消防栓救災佈線系統 - 動態追蹤版</title>
+    <title>消防栓救災佈線系統 - 實戰節流版</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
@@ -67,14 +67,13 @@
         
         .custom-marker { border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5); }
         
-        /* 動態小藍點樣式 */
         .user-marker {
             background-color: #2196F3;
             width: 16px; height: 16px;
             border-radius: 50%;
             border: 3px solid white;
             box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.4), 0 2px 4px rgba(0,0,0,0.3);
-            transition: all 0.3s ease; /* 讓移動看起來平滑 */
+            transition: all 0.3s ease; 
         }
     </style>
 </head>
@@ -128,14 +127,15 @@
         let currentHydrantsData = []; 
         let currentSelectedHydrant = null; 
 
-        // 【新增】動態追蹤變數
+        // 動態追蹤與節流變數
         let watchId = null;
         let lastUserLat = null;
         let lastUserLng = null;
-        let isFirstLocation = true; // 判斷是否為第一次定位，用來查資料庫
+        let isFirstLocation = true; 
+        let lastFetchTime = 0; // 🛑 新增：記錄上次請求 OSRM 的時間
 
         window.searchByAddress = async function() {
-            stopGPSWatch(); // 如果原本有開 GPS，先關掉
+            stopGPSWatch(); 
             const address = document.getElementById('addressInput').value;
             if (!address) return alert("請輸入地址");
             
@@ -152,13 +152,8 @@
             } catch (e) { setStatus("地址解析服務異常"); }
         };
 
-        // 【修改】切換 GPS 追蹤狀態
         window.toggleGPSWatch = function() {
-            if (watchId !== null) {
-                stopGPSWatch();
-            } else {
-                startGPSWatch();
-            }
+            if (watchId !== null) { stopGPSWatch(); } else { startGPSWatch(); }
         };
 
         function stopGPSWatch() {
@@ -176,17 +171,17 @@
             if (!navigator.geolocation) return alert("瀏覽器不支援 GPS");
 
             document.getElementById('gpsBtn').innerText = "⏹️ 停止 GPS 追蹤";
-            document.getElementById('gpsBtn').style.backgroundColor = "#4caf50"; // 變成綠色表示運作中
+            document.getElementById('gpsBtn').style.backgroundColor = "#4caf50"; 
             setStatus("正在請求高精度 GPS 衛星訊號...");
             isFirstLocation = true;
+            lastFetchTime = 0; // 重置計時器
 
-            // 使用 watchPosition 持續監聽
             watchId = navigator.geolocation.watchPosition(
                 async (pos) => {
                     const lat = pos.coords.latitude;
                     const lng = pos.coords.longitude;
                     
-                    // 防呆：如果移動距離太小 (小於 2 公尺)，就不浪費資源重算
+                    // 🛡️ 防護 1：移動超過 2 公尺才做事
                     if (lastUserLat && lastUserLng) {
                         const moveDist = map.distance([lastUserLat, lastUserLng], [lat, lng]);
                         if (moveDist < 2) return; 
@@ -195,17 +190,13 @@
                     lastUserLat = lat;
                     lastUserLng = lng;
                     
-                    // 更新地圖上的小藍點
                     updateUserMarker(lat, lng);
-                    
                     setStatus(`GPS 精度: ${Math.round(pos.coords.accuracy)} 公尺`);
 
-                    // 如果是第一次定位，才去資料庫抓「附近的消防栓」
                     if (isFirstLocation) {
                         isFirstLocation = false;
                         await processLocation(lat, lng, 200);
                     } else {
-                        // 如果已經有資料了，你只是在走動，那就只「更新距離」，不要重抓資料庫
                         if (currentSelectedHydrant) {
                             await updateLiveDistance();
                         }
@@ -215,15 +206,10 @@
                     setStatus(`GPS 錯誤: ${err.message}`); 
                     stopGPSWatch();
                 },
-                { 
-                    enableHighAccuracy: true, // 強制要求高精度 (GPS 晶片)
-                    maximumAge: 0,            // 不要用舊的快取
-                    timeout: 10000            // 10 秒超時
-                }
+                { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
             );
         }
 
-        // 獨立出更新使用者圖示的函數 (小藍點)
         function updateUserMarker(lat, lng) {
             if (!userMarker) {
                 const userIcon = L.divIcon({ className: 'user-marker', iconSize: [16, 16] });
@@ -233,38 +219,38 @@
             }
         }
 
-        let lastFetchTime = 0; // 記錄上次抓取時間
-        // 【新增】只更新當前選中消防栓的距離 (不重抓資料庫)
+        // 🛡️ 核心修改：加入 5 秒節流防護
         async function updateLiveDistance() {
             if (!currentSelectedHydrant || !lastUserLat || !lastUserLng) return;
 
             const h = currentSelectedHydrant;
-            const now = Date.now();
-
-            // 1. 直線距離：手機自己算，永遠即時更新 (0 延遲，不耗資源)
+            
+            // 1. 直線距離：手機晶片自己算，永遠 0 延遲即時更新
             h.straightDistance = map.distance([lastUserLat, lastUserLng], [h.latitude, h.longitude]);
 
-            // 2. 街道模式：加入「5秒節流閥」，防止 100 人把 API 塞爆
+            // 2. 街道模式：啟動 5 秒防護罩
             if (!isStraightLineMode) {
-                if (now - lastFetchTime > 5000) { // 距離上次請求超過 5 秒才執行
+                const now = Date.now();
+                // 🛡️ 防護 2：距離上次請求超過 5000 毫秒 (5秒) 才准放行
+                if (now - lastFetchTime > 5000) { 
                     const osrmData = await getOSRMRoute(lastUserLng, lastUserLat, h.longitude, h.latitude);
                     if (osrmData) {
                         h.streetDistance = osrmData.distance;
                         h.streetRoute = osrmData.geometry;
-                        lastFetchTime = now; // 更新最後請求時間
+                        lastFetchTime = now; // 記錄這次請求的時間
                     }
                 }
             }
 
+            // 更新卡片數字和地圖上的線條
             showCard(h);
             drawRouteLine(h);
         }
 
-        // 原始的抓資料庫邏輯 (幾乎沒變)
         async function processLocation(lat, lng, radius) {
             if(routeLayer) map.removeLayer(routeLayer);
             document.getElementById('hydrant-card').style.display = 'none';
-            map.setView([lat, lng], 17); // 拉近一點看
+            map.setView([lat, lng], 17); 
 
             const { data: hydrants, error } = await supabaseClient.rpc('search_nearby_hydrants', {
                 user_lat: lat, user_lng: lng, radius_meters: radius
@@ -288,6 +274,8 @@
                 }
                 currentHydrantsData.push(h);
             }
+            
+            lastFetchTime = Date.now(); // 第一次批次抓完後，重置計時器
 
             updateRender();
             
@@ -300,7 +288,7 @@
 
         async function getOSRMRoute(startLng, startLat, endLng, endLat) {
             try {
-                // 🛑 記得確認你後端 HF 是否有改成 foot.lua，如果沒有，請把這裡改回 driving
+                // 如果後端沒改成功，記得這裡改回 driving
                 const url = `${HF_OSRM_URL}/route/v1/foot/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
                 const res = await fetch(url);
                 const data = await res.json();
