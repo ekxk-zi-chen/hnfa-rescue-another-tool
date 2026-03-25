@@ -3,106 +3,199 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>消防栓救災佈線系統 - 實戰節流版</title>
+    <title>消防栓救災佈線系統 - 極致UI版</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
     <style>
-        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow: hidden; }
         #map { width: 100vw; height: 100vh; z-index: 1; }
         
-        .control-panel {
+        /* 1. 右上角：收合選單與搜尋面板 */
+        .top-right-panel {
             position: absolute;
-            top: 10px;
-            left: 50%;
-            transform: translateX(-50%);
+            top: 15px;
+            right: 15px;
             z-index: 1000;
-            background: white;
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-            width: 90%;
-            max-width: 400px;
             display: flex;
             flex-direction: column;
+            align-items: flex-end;
             gap: 10px;
         }
 
-        .input-group { display: flex; gap: 5px; }
-        input[type="text"] { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; }
-        button {
-            padding: 10px;
-            background-color: #e53935;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            font-size: 16px;
+        .menu-btn {
+            background: white;
+            border: 2px solid rgba(0,0,0,0.2);
+            border-radius: 8px;
+            width: 44px;
+            height: 44px;
             cursor: pointer;
-            font-weight: bold;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
             transition: 0.2s;
         }
-        button:hover { filter: brightness(0.9); }
-        .btn-gps { background-color: #1e88e5; }
-        .btn-toggle { background-color: #8e24aa; } 
-
-        #hydrant-card {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 1000;
+        .menu-btn:hover { background-color: #f0f0f0; }
+        
+        /* 搜尋面板 (預設展開) */
+        .search-panel {
             background: white;
             padding: 15px;
             border-radius: 12px;
-            box-shadow: 0 -4px 16px rgba(0,0,0,0.2);
-            width: 90%;
-            max-width: 350px;
-            display: none; 
+            box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+            width: 280px;
+            display: block; /* 預設展開 */
         }
-        .card-header { font-size: 18px; font-weight: bold; margin-bottom: 8px; border-bottom: 2px solid #eee; padding-bottom: 5px; }
-        .card-body p { margin: 5px 0; font-size: 14px; color: #333; }
-        .highlight-dist { color: #e53935; font-weight: bold; font-size: 16px; }
-        .highlight-hose { color: #1e88e5; font-weight: bold; font-size: 16px; }
-        .mode-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 12px; color: white; background-color: #666; margin-left: 10px;}
+        .search-panel.hidden { display: none; }
         
-        .custom-marker { border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5); }
+        .input-group { display: flex; gap: 5px; margin-bottom: 10px; }
+        input[type="text"] { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; width: 100%; box-sizing: border-box; }
+        .btn-search { background-color: #e53935; color: white; border: none; border-radius: 6px; padding: 0 15px; font-weight: bold; cursor: pointer; }
         
-        .user-marker {
-            background-color: #2196F3;
-            width: 16px; height: 16px;
+        .legend-box { font-size: 12px; color: #555; background: #f9f9f9; padding: 10px; border-radius: 6px; border: 1px solid #eee; }
+        .legend-box div { margin-bottom: 5px; display: flex; align-items: center; gap: 8px;}
+
+        /* 2. 右下角：浮動操作按鈕群 */
+        .bottom-right-panel {
+            position: absolute;
+            bottom: 30px;
+            right: 15px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .fab-btn {
+            width: 50px;
+            height: 50px;
             border-radius: 50%;
-            border: 3px solid white;
-            box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.4), 0 2px 4px rgba(0,0,0,0.3);
-            transition: all 0.3s ease; 
+            border: 2px solid rgba(0,0,0,0.1);
+            background-color: white;
+            color: #333;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.3);
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: all 0.3s ease;
         }
+        /* GPS 動態追蹤按鈕狀態 */
+        .fab-btn.gps-active { background-color: #4caf50; border-color: #2e7d32; }
+        .fab-btn.gps-active svg fill { fill: white !important; }
+        
+        /* 模式切換按鈕狀態 */
+        .fab-btn.mode-street { background-color: #8e24aa; } /* 紫色街道 */
+        .fab-btn.mode-straight { background-color: #f57c00; } /* 橘色直線 */
+
+        /* 3. 左下角：強制立即定位按鈕 */
+        .bottom-left-panel {
+            position: absolute;
+            bottom: 30px;
+            left: 15px;
+            z-index: 1000;
+        }
+        .fab-btn-force {
+            width: 50px; height: 50px; border-radius: 50%; border: none;
+            background-color: #1e88e5; box-shadow: 0 3px 10px rgba(30,136,229,0.5);
+            cursor: pointer; display: flex; justify-content: center; align-items: center;
+        }
+        .fab-btn-force:active { transform: scale(0.9); background-color: #1565c0; }
+
+        /* 4. 畫面上方：消防栓資訊卡 (瘦身版) */
+        #hydrant-card {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(5px);
+            padding: 12px 18px;
+            border-radius: 30px; /* 膠囊形狀 */
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+            width: 85%;
+            max-width: 400px;
+            display: none; 
+            border: 1px solid #ddd;
+        }
+        .card-header { font-size: 16px; font-weight: 800; color: #d32f2f; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;}
+        .card-body { display: flex; justify-content: space-between; align-items: center; font-size: 14px;}
+        .card-body-left { flex: 1; }
+        .card-body-right { text-align: right; border-left: 2px solid #eee; padding-left: 12px; margin-left: 8px;}
+        .card-body p { margin: 2px 0; color: #444; }
+        .highlight-dist { font-size: 20px; font-weight: 900; color: #212121; }
+        .highlight-hose { font-size: 15px; font-weight: bold; color: #1e88e5; }
+        .accuracy-text { font-size: 11px; color: #888; font-weight: normal; margin-left: 5px; }
+        .mode-badge { padding: 2px 8px; border-radius: 12px; font-size: 11px; color: white; font-weight: bold;}
+        
+        /* 地圖標記 */
+        .custom-marker { border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5); }
+        .user-marker { background-color: #2196F3; width: 16px; height: 16px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.4), 0 2px 4px rgba(0,0,0,0.3); transition: all 0.3s ease; }
     </style>
 </head>
 <body>
 
-    <div class="control-panel">
-        <div class="input-group">
-            <input type="text" id="addressInput" placeholder="輸入火警地址 (例:花蓮市中正路)">
-            <button onclick="searchByAddress()">地址定位</button>
-        </div>
-        <button id="gpsBtn" class="btn-gps" onclick="toggleGPSWatch()">📍 開啟動態 GPS 追蹤</button>
-        <button id="toggleModeBtn" class="btn-toggle" onclick="toggleDistanceMode()">🔄 目前模式：實際街道距離</button>
-        <div id="statusText" style="font-size: 12px; color: #666; text-align: center;">系統就緒</div>
-    </div>
-
-    <div id="map"></div>
-
     <div id="hydrant-card">
         <div class="card-header">
-            <span id="cardName">消防栓編號</span>
+            <span id="cardName">消防栓名稱</span>
             <span id="cardModeBadge" class="mode-badge">街道</span>
         </div>
         <div class="card-body">
-            <p><strong>地址：</strong><span id="cardAddress"></span></p>
-            <p><strong>狀態：</strong><span id="cardType"></span></p>
-            <p><strong><span id="cardDistLabel">街道</span>距離：</strong><span id="cardDist" class="highlight-dist"></span></p>
-            <p><strong>建議佈線：</strong><span id="cardHose" class="highlight-hose"></span></p>
+            <div class="card-body-left">
+                <p id="cardAddress" style="font-size: 12px; color: #666;"></p>
+                <p>建議佈線：<span id="cardHose" class="highlight-hose"></span></p>
+            </div>
+            <div class="card-body-right">
+                <span id="cardDist" class="highlight-dist"></span>
+                <p style="font-size: 11px; color: #888; margin-top: 2px;">
+                    <span id="cardDistLabel">街道</span>距離
+                    <span id="cardAccuracy" class="accuracy-text"></span>
+                </p>
+            </div>
         </div>
     </div>
+
+    <div class="top-right-panel">
+        <button class="menu-btn" onclick="toggleSearchPanel()">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="#333"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+        </button>
+        
+        <div id="searchPanel" class="search-panel">
+            <div class="input-group">
+                <input type="text" id="addressInput" placeholder="輸入火警地址">
+                <button class="btn-search" onclick="searchByAddress()">定位</button>
+            </div>
+            
+            <div class="legend-box">
+                <div style="font-weight:bold; margin-bottom: 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px;">圖示說明與狀態</div>
+                <div><div style="width:12px; height:12px; border-radius:50%; background:#4caf50;"></div> <span>右下：開啟/關閉 GPS 動態追蹤</span></div>
+                <div><div style="width:12px; height:12px; border-radius:50%; background:#8e24aa;"></div> <span>右下：切換街道(紫) / 直線(橘) 模式</span></div>
+                <div><div style="width:12px; height:12px; border-radius:50%; background:#1e88e5;"></div> <span>左下：強制立即定位 (無視節流)</span></div>
+                <div style="margin-top: 8px; text-align: center; color: #e53935; font-weight: bold;" id="statusText">系統就緒</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="bottom-right-panel">
+        <button id="toggleModeBtn" class="fab-btn mode-street" onclick="toggleDistanceMode()" title="切換距離模式">
+            <svg id="icon-street" viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M18.15 15.65l-3.3-3.3v-1.15l1.65-1.65c.3-.3.3-.8 0-1.1l-2.4-2.4c-.3-.3-.8-.3-1.1 0L11.35 7.7h-1.15l-3.3-3.3c-.4-.4-1.05-.4-1.4 0l-1.4 1.4c-.4.4-.4 1.05 0 1.4l3.3 3.3v1.15L5.75 13.3c-.3.3-.3.8 0 1.1l2.4 2.4c.3.3.8.3 1.1 0l1.65-1.65h1.15l3.3 3.3c.4.4 1.05.4 1.4 0l1.4-1.4c.4-.4.4-1.05 0-1.4z"/></svg>
+            <svg id="icon-straight" viewBox="0 0 24 24" width="24" height="24" fill="white" style="display:none;"><path d="M13.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM9.8 8.9L7 23h2.1l1.8-8 2.1 2v6h2v-7.5l-2.1-2 .6-3C14.8 12 16.8 13 19 13v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.1L6 8.3V13h2V9.6l1.8-.7"/></svg>
+        </button>
+        
+        <button id="gpsBtn" class="fab-btn" onclick="toggleGPSWatch()" title="開啟動態追蹤">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="#555"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V1h-2v2.06C6.83 3.52 3.52 6.83 3.06 11H1v2h2.06c.46 4.17 3.77 7.48 7.94 7.94V23h2v-2.06c4.17-.46 7.48-3.77 7.94-7.94H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
+        </button>
+    </div>
+
+    <div class="bottom-left-panel">
+        <button class="fab-btn-force" onclick="forceImmediateLocation()" title="強制立即定位">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="white"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+        </button>
+    </div>
+
+    <div id="map"></div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -114,10 +207,8 @@
 
         const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-        const map = L.map('map').setView([23.993, 121.602], 14);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
+        const map = L.map('map', {zoomControl: false}).setView([23.993, 121.602], 14); // 關掉預設放大縮小按鈕讓畫面更乾淨
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OS' }).addTo(map);
 
         let currentMarkers = []; 
         let userMarker = null;   
@@ -127,19 +218,31 @@
         let currentHydrantsData = []; 
         let currentSelectedHydrant = null; 
 
-        // 動態追蹤與節流變數
+        // GPS 變數
         let watchId = null;
         let lastUserLat = null;
         let lastUserLng = null;
+        let currentAccuracy = null; // 儲存目前的精度
         let isFirstLocation = true; 
-        let lastFetchTime = 0; // 🛑 新增：記錄上次請求 OSRM 的時間
+        let lastFetchTime = 0;
 
+        // --- UI 控制 ---
+        function toggleSearchPanel() {
+            const panel = document.getElementById('searchPanel');
+            panel.classList.toggle('hidden');
+        }
+
+        function setStatus(text) { 
+            document.getElementById('statusText').innerText = text; 
+        }
+
+        // --- 核心定位與按鈕邏輯 ---
         window.searchByAddress = async function() {
             stopGPSWatch(); 
             const address = document.getElementById('addressInput').value;
             if (!address) return alert("請輸入地址");
             
-            setStatus("正在解析地址...");
+            setStatus("解析地址中...");
             try {
                 const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`);
                 const data = await res.json();
@@ -147,64 +250,102 @@
                 
                 const lat = parseFloat(data[0].lat);
                 const lng = parseFloat(data[0].lon);
+                currentAccuracy = null; // 手動輸入無精度
                 updateUserMarker(lat, lng);
                 processLocation(lat, lng, 500); 
-            } catch (e) { setStatus("地址解析服務異常"); }
+                toggleSearchPanel(); // 搜完自動收合面板
+            } catch (e) { setStatus("地址解析失敗"); }
         };
 
+        // 【新增】左下角：強制立即定位
+        window.forceImmediateLocation = function() {
+            if (!navigator.geolocation) return alert("瀏覽器不支援 GPS");
+            setStatus("強制獲取當前座標...");
+            
+            navigator.geolocation.getCurrentPosition(
+                async (pos) => {
+                    const lat = pos.coords.latitude;
+                    const lng = pos.coords.longitude;
+                    lastUserLat = lat;
+                    lastUserLng = lng;
+                    currentAccuracy = Math.round(pos.coords.accuracy);
+                    
+                    updateUserMarker(lat, lng);
+                    setStatus(`強制定位成功 (精度: ${currentAccuracy}m)`);
+                    
+                    // 強制洗掉節流閥，立刻請求
+                    lastFetchTime = 0; 
+                    
+                    if (currentSelectedHydrant) {
+                        // 如果畫面上有選中的消防栓，只重算這支
+                        await updateLiveDistance();
+                    } else {
+                        // 如果是剛打開網頁，就去查附近消防栓
+                        await processLocation(lat, lng, 200);
+                    }
+                    map.setView([lat, lng], 18);
+                },
+                (err) => { alert("無法取得定位"); },
+                { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+            );
+        };
+
+        // 右下角：切換動態追蹤
         window.toggleGPSWatch = function() {
-            if (watchId !== null) { stopGPSWatch(); } else { startGPSWatch(); }
+            const btn = document.getElementById('gpsBtn');
+            if (watchId !== null) { 
+                stopGPSWatch(); 
+                btn.classList.remove('gps-active');
+            } else { 
+                startGPSWatch(); 
+                btn.classList.add('gps-active');
+            }
         };
 
         function stopGPSWatch() {
             if (watchId !== null) {
                 navigator.geolocation.clearWatch(watchId);
                 watchId = null;
-                document.getElementById('gpsBtn').innerText = "📍 開啟動態 GPS 追蹤";
-                document.getElementById('gpsBtn').style.backgroundColor = "#1e88e5";
                 setStatus("GPS 追蹤已停止");
             }
         }
 
         function startGPSWatch() {
-            if (window.location.protocol === 'file:') return alert("警告：無法在 file:// 使用 GPS");
+            if (window.location.protocol === 'file:') return alert("請使用 Local Server 測試");
             if (!navigator.geolocation) return alert("瀏覽器不支援 GPS");
 
-            document.getElementById('gpsBtn').innerText = "⏹️ 停止 GPS 追蹤";
-            document.getElementById('gpsBtn').style.backgroundColor = "#4caf50"; 
-            setStatus("正在請求高精度 GPS 衛星訊號...");
+            setStatus("尋找衛星訊號...");
             isFirstLocation = true;
-            lastFetchTime = 0; // 重置計時器
+            lastFetchTime = 0; 
 
             watchId = navigator.geolocation.watchPosition(
                 async (pos) => {
                     const lat = pos.coords.latitude;
                     const lng = pos.coords.longitude;
+                    currentAccuracy = Math.round(pos.coords.accuracy);
                     
-                    // 🛡️ 防護 1：移動超過 2 公尺才做事
                     if (lastUserLat && lastUserLng) {
                         const moveDist = map.distance([lastUserLat, lastUserLng], [lat, lng]);
-                        if (moveDist < 2) return; 
+                        if (moveDist < 2) return; // 節流
                     }
 
                     lastUserLat = lat;
                     lastUserLng = lng;
                     
                     updateUserMarker(lat, lng);
-                    setStatus(`GPS 精度: ${Math.round(pos.coords.accuracy)} 公尺`);
+                    setStatus(`追蹤中... (精度: ${currentAccuracy}m)`);
 
                     if (isFirstLocation) {
                         isFirstLocation = false;
                         await processLocation(lat, lng, 200);
+                        document.getElementById('searchPanel').classList.add('hidden'); // 找到後收合面板
                     } else {
-                        if (currentSelectedHydrant) {
-                            await updateLiveDistance();
-                        }
+                        if (currentSelectedHydrant) await updateLiveDistance();
                     }
                 },
                 (err) => { 
-                    setStatus(`GPS 錯誤: ${err.message}`); 
-                    stopGPSWatch();
+                    setStatus(`GPS 錯誤`); 
+                    toggleGPSWatch(); // 關閉按鈕狀態
                 },
                 { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
             );
@@ -219,30 +360,49 @@
             }
         }
 
-        // 🛡️ 核心修改：加入 5 秒節流防護
+        // 右下角：切換距離模式 (只換圖示與顏色)
+        window.toggleDistanceMode = function() {
+            isStraightLineMode = !isStraightLineMode; 
+            const btn = document.getElementById('toggleModeBtn');
+            
+            if (isStraightLineMode) {
+                btn.classList.remove('mode-street');
+                btn.classList.add('mode-straight');
+                document.getElementById('icon-street').style.display = 'none';
+                document.getElementById('icon-straight').style.display = 'block';
+            } else {
+                btn.classList.remove('mode-straight');
+                btn.classList.add('mode-street');
+                document.getElementById('icon-street').style.display = 'block';
+                document.getElementById('icon-straight').style.display = 'none';
+            }
+            
+            if (currentHydrantsData.length > 0) {
+                updateRender();
+                if (currentSelectedHydrant) {
+                    showCard(currentSelectedHydrant);
+                    drawRouteLine(currentSelectedHydrant);
+                }
+            }
+        };
+
+        // --- 核心計算邏輯 ---
         async function updateLiveDistance() {
             if (!currentSelectedHydrant || !lastUserLat || !lastUserLng) return;
-
             const h = currentSelectedHydrant;
-            
-            // 1. 直線距離：手機晶片自己算，永遠 0 延遲即時更新
             h.straightDistance = map.distance([lastUserLat, lastUserLng], [h.latitude, h.longitude]);
 
-            // 2. 街道模式：啟動 5 秒防護罩
             if (!isStraightLineMode) {
                 const now = Date.now();
-                // 🛡️ 防護 2：距離上次請求超過 5000 毫秒 (5秒) 才准放行
                 if (now - lastFetchTime > 5000) { 
                     const osrmData = await getOSRMRoute(lastUserLng, lastUserLat, h.longitude, h.latitude);
                     if (osrmData) {
                         h.streetDistance = osrmData.distance;
                         h.streetRoute = osrmData.geometry;
-                        lastFetchTime = now; // 記錄這次請求的時間
+                        lastFetchTime = now; 
                     }
                 }
             }
-
-            // 更新卡片數字和地圖上的線條
             showCard(h);
             drawRouteLine(h);
         }
@@ -258,7 +418,7 @@
 
             if (error || !hydrants || hydrants.length === 0) {
                 if(radius === 200) return processLocation(lat, lng, 300); 
-                return setStatus("此範圍內查無可用消防栓");
+                return setStatus("範圍內查無消防栓");
             }
 
             currentHydrantsData = []; 
@@ -275,8 +435,7 @@
                 currentHydrantsData.push(h);
             }
             
-            lastFetchTime = Date.now(); // 第一次批次抓完後，重置計時器
-
+            lastFetchTime = Date.now(); 
             updateRender();
             
             if (currentHydrantsData.length > 0 && currentHydrantsData[0][getActiveDistanceKey()] <= 100) {
@@ -288,13 +447,10 @@
 
         async function getOSRMRoute(startLng, startLat, endLng, endLat) {
             try {
-                // 如果後端沒改成功，記得這裡改回 driving
                 const url = `${HF_OSRM_URL}/route/v1/foot/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
                 const res = await fetch(url);
                 const data = await res.json();
-                if(data.code === 'Ok') {
-                    return { distance: data.routes[0].distance, geometry: data.routes[0].geometry };
-                }
+                if(data.code === 'Ok') return { distance: data.routes[0].distance, geometry: data.routes[0].geometry };
                 return null;
             } catch (e) { return null; }
         }
@@ -305,7 +461,7 @@
 
             if (isStraightLineMode) {
                 routeLayer = L.polyline([[lastUserLat, lastUserLng], [h.latitude, h.longitude]], {
-                    color: '#1e88e5', weight: 4, dashArray: '10, 10'
+                    color: '#1e88e5', weight: 4, dashArray: '8, 8'
                 }).addTo(map);
             } else {
                 if (h.streetRoute) {
@@ -315,21 +471,6 @@
                 }
             }
         }
-
-        window.toggleDistanceMode = function() {
-            isStraightLineMode = !isStraightLineMode; 
-            const btn = document.getElementById('toggleModeBtn');
-            btn.innerText = isStraightLineMode ? "🔄 目前模式：純直線跨越" : "🔄 目前模式：實際街道距離";
-            btn.style.backgroundColor = isStraightLineMode ? "#f57c00" : "#8e24aa"; 
-            
-            if (currentHydrantsData.length > 0) {
-                updateRender();
-                if (currentSelectedHydrant) {
-                    showCard(currentSelectedHydrant);
-                    drawRouteLine(currentSelectedHydrant);
-                }
-            }
-        };
 
         function getActiveDistanceKey() { return isStraightLineMode ? 'straightDistance' : 'streetDistance'; }
 
@@ -359,29 +500,33 @@
             });
         }
         
+        // --- 瘦身版卡片渲染 ---
         function showCard(h) {
             document.getElementById('hydrant-card').style.display = 'block';
             document.getElementById('cardName').innerText = h.name || '未知名稱';
             document.getElementById('cardAddress').innerText = h.address || '無地址資訊';
-            document.getElementById('cardType').innerText = h.status || '堪用';
             
             const distKey = getActiveDistanceKey();
             const currentDist = h[distKey];
             
-            document.getElementById('cardModeBadge').innerText = isStraightLineMode ? "直線" : "街道";
-            document.getElementById('cardModeBadge').style.backgroundColor = isStraightLineMode ? "#f57c00" : "#8e24aa";
+            const badge = document.getElementById('cardModeBadge');
+            badge.innerText = isStraightLineMode ? "人行直線" : "實際街道";
+            badge.style.backgroundColor = isStraightLineMode ? "#f57c00" : "#8e24aa";
+            
             document.getElementById('cardDistLabel').innerText = isStraightLineMode ? "直線" : "街道";
-            document.getElementById('cardDist').innerText = `${currentDist.toFixed(1)} 米`;
+            document.getElementById('cardDist').innerText = `${currentDist.toFixed(1)}m`;
+
+            // 將 GPS 精度寫在距離旁邊
+            const accText = document.getElementById('cardAccuracy');
+            accText.innerText = currentAccuracy ? `(精度: ${currentAccuracy}m)` : '';
 
             const baseHose = Math.ceil(currentDist / 20);
             const remainder = currentDist % 20;
-            let advice = "(建議預備一條)";
-            if (remainder > 17 || remainder === 0) advice = "(距離緊繃，建議預備一條)";
+            let advice = "";
+            if (remainder > 17 || remainder === 0) advice = "(緊繃預備)";
 
-            document.getElementById('cardHose').innerText = `${baseHose} + 1 條\n(${currentDist.toFixed(1)}米/20，${advice})`;
+            document.getElementById('cardHose').innerText = `${baseHose} + 1 條 ${advice}`;
         }
-
-        function setStatus(text) { document.getElementById('statusText').innerText = text; }
     </script>
 </body>
 </html>
