@@ -233,25 +233,29 @@
             }
         }
 
+        let lastFetchTime = 0; // 記錄上次抓取時間
         // 【新增】只更新當前選中消防栓的距離 (不重抓資料庫)
         async function updateLiveDistance() {
             if (!currentSelectedHydrant || !lastUserLat || !lastUserLng) return;
 
             const h = currentSelectedHydrant;
-            
-            // 1. 重算直線距離 (瞬間完成)
+            const now = Date.now();
+
+            // 1. 直線距離：手機自己算，永遠即時更新 (0 延遲，不耗資源)
             h.straightDistance = map.distance([lastUserLat, lastUserLng], [h.latitude, h.longitude]);
 
-            // 2. 如果目前是街道模式，要重新呼叫 HF 引擎算路徑
+            // 2. 街道模式：加入「5秒節流閥」，防止 100 人把 API 塞爆
             if (!isStraightLineMode) {
-                const osrmData = await getOSRMRoute(lastUserLng, lastUserLat, h.longitude, h.latitude);
-                if (osrmData) {
-                    h.streetDistance = osrmData.distance;
-                    h.streetRoute = osrmData.geometry;
+                if (now - lastFetchTime > 5000) { // 距離上次請求超過 5 秒才執行
+                    const osrmData = await getOSRMRoute(lastUserLng, lastUserLat, h.longitude, h.latitude);
+                    if (osrmData) {
+                        h.streetDistance = osrmData.distance;
+                        h.streetRoute = osrmData.geometry;
+                        lastFetchTime = now; // 更新最後請求時間
+                    }
                 }
             }
 
-            // 更新卡片數字和地圖上的線條
             showCard(h);
             drawRouteLine(h);
         }
