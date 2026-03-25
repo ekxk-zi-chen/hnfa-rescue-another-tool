@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>消防栓救災佈線系統 - 實戰版</title>
+    <title>消防栓救災佈線系統 - 動態追蹤版</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
@@ -43,7 +43,7 @@
         }
         button:hover { filter: brightness(0.9); }
         .btn-gps { background-color: #1e88e5; }
-        .btn-toggle { background-color: #8e24aa; } /* 切換模式按鈕的顏色 */
+        .btn-toggle { background-color: #8e24aa; } 
 
         #hydrant-card {
             position: absolute;
@@ -66,6 +66,16 @@
         .mode-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 12px; color: white; background-color: #666; margin-left: 10px;}
         
         .custom-marker { border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5); }
+        
+        /* 動態小藍點樣式 */
+        .user-marker {
+            background-color: #2196F3;
+            width: 16px; height: 16px;
+            border-radius: 50%;
+            border: 3px solid white;
+            box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.4), 0 2px 4px rgba(0,0,0,0.3);
+            transition: all 0.3s ease; /* 讓移動看起來平滑 */
+        }
     </style>
 </head>
 <body>
@@ -75,9 +85,9 @@
             <input type="text" id="addressInput" placeholder="輸入火警地址 (例:花蓮市中正路)">
             <button onclick="searchByAddress()">地址定位</button>
         </div>
-        <button class="btn-gps" onclick="searchByGPS()">📍 我附近的消防栓</button>
+        <button id="gpsBtn" class="btn-gps" onclick="toggleGPSWatch()">📍 開啟動態 GPS 追蹤</button>
         <button id="toggleModeBtn" class="btn-toggle" onclick="toggleDistanceMode()">🔄 目前模式：實際街道距離</button>
-        <div id="statusText" style="font-size: 12px; color: #666; text-align: center;">系統就緒 (請確保使用 Local Server 或 HTTPS 開啟)</div>
+        <div id="statusText" style="font-size: 12px; color: #666; text-align: center;">系統就緒</div>
     </div>
 
     <div id="map"></div>
@@ -99,18 +109,12 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
     <script>
-        // ==========================================
-        // 1. 系統設定
-        // ==========================================
         const SUPABASE_URL = 'https://gltzwtqcrdpdumzitbib.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdsdHp3dHFjcmRwZHVteml0YmliIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTczNzQyODcsImV4cCI6MjA3Mjk1MDI4N30.6svHYwJUM8aZF71pY0N3Wx4KiaSMN-GiibyLGZDsygE';
         const HF_OSRM_URL = 'https://zichen08-hualien-fire-routing.hf.space';
 
         const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-        // ==========================================
-        // 2. 初始化地圖與全域變數
-        // ==========================================
         const map = L.map('map').setView([23.993, 121.602], 14);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap contributors'
@@ -118,18 +122,20 @@
 
         let currentMarkers = []; 
         let userMarker = null;   
-        let routeLayer = null; // 用來儲存畫出來的路線，方便隨時清除
+        let routeLayer = null; 
         
-        // 【新增】全域狀態管理
-        let isStraightLineMode = false; // 預設使用街道距離
-        let currentHydrantsData = [];   // 儲存當前搜到的所有消防栓資料
-        let currentSelectedHydrant = null; // 目前正在查看的消防栓
+        let isStraightLineMode = false; 
+        let currentHydrantsData = []; 
+        let currentSelectedHydrant = null; 
 
-        // ==========================================
-        // 3. 核心業務邏輯
-        // ==========================================
+        // 【新增】動態追蹤變數
+        let watchId = null;
+        let lastUserLat = null;
+        let lastUserLng = null;
+        let isFirstLocation = true; // 判斷是否為第一次定位，用來查資料庫
 
         window.searchByAddress = async function() {
+            stopGPSWatch(); // 如果原本有開 GPS，先關掉
             const address = document.getElementById('addressInput').value;
             if (!address) return alert("請輸入地址");
             
@@ -141,124 +147,175 @@
                 
                 const lat = parseFloat(data[0].lat);
                 const lng = parseFloat(data[0].lon);
+                updateUserMarker(lat, lng);
                 processLocation(lat, lng, 500); 
             } catch (e) { setStatus("地址解析服務異常"); }
         };
 
-        window.searchByGPS = function() {
-            if (window.location.protocol === 'file:') {
-                alert("警告：瀏覽器不允許在桌面直接開啟檔案 (file://) 時使用 GPS。\n請使用 VS Code 的 Live Server 測試！");
-                return setStatus("定位失敗：協定錯誤");
+        // 【修改】切換 GPS 追蹤狀態
+        window.toggleGPSWatch = function() {
+            if (watchId !== null) {
+                stopGPSWatch();
+            } else {
+                startGPSWatch();
             }
-
-            setStatus("正在取得手機 GPS...");
-            if (!navigator.geolocation) return alert("瀏覽器不支援 GPS");
-
-            navigator.geolocation.getCurrentPosition(
-                (pos) => { processLocation(pos.coords.latitude, pos.coords.longitude, 200); },
-                (err) => { alert("無法取得定位，請確認權限"); setStatus("定位失敗"); },
-                { enableHighAccuracy: true, timeout: 10000 }
-            );
         };
 
-        async function processLocation(lat, lng, radius) {
-            setStatus(`搜尋 ${radius}m 內消防栓...`);
+        function stopGPSWatch() {
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+                document.getElementById('gpsBtn').innerText = "📍 開啟動態 GPS 追蹤";
+                document.getElementById('gpsBtn').style.backgroundColor = "#1e88e5";
+                setStatus("GPS 追蹤已停止");
+            }
+        }
+
+        function startGPSWatch() {
+            if (window.location.protocol === 'file:') return alert("警告：無法在 file:// 使用 GPS");
+            if (!navigator.geolocation) return alert("瀏覽器不支援 GPS");
+
+            document.getElementById('gpsBtn').innerText = "⏹️ 停止 GPS 追蹤";
+            document.getElementById('gpsBtn').style.backgroundColor = "#4caf50"; // 變成綠色表示運作中
+            setStatus("正在請求高精度 GPS 衛星訊號...");
+            isFirstLocation = true;
+
+            // 使用 watchPosition 持續監聽
+            watchId = navigator.geolocation.watchPosition(
+                async (pos) => {
+                    const lat = pos.coords.latitude;
+                    const lng = pos.coords.longitude;
+                    
+                    // 防呆：如果移動距離太小 (小於 2 公尺)，就不浪費資源重算
+                    if (lastUserLat && lastUserLng) {
+                        const moveDist = map.distance([lastUserLat, lastUserLng], [lat, lng]);
+                        if (moveDist < 2) return; 
+                    }
+
+                    lastUserLat = lat;
+                    lastUserLng = lng;
+                    
+                    // 更新地圖上的小藍點
+                    updateUserMarker(lat, lng);
+                    
+                    setStatus(`GPS 精度: ${Math.round(pos.coords.accuracy)} 公尺`);
+
+                    // 如果是第一次定位，才去資料庫抓「附近的消防栓」
+                    if (isFirstLocation) {
+                        isFirstLocation = false;
+                        await processLocation(lat, lng, 200);
+                    } else {
+                        // 如果已經有資料了，你只是在走動，那就只「更新距離」，不要重抓資料庫
+                        if (currentSelectedHydrant) {
+                            await updateLiveDistance();
+                        }
+                    }
+                },
+                (err) => { 
+                    setStatus(`GPS 錯誤: ${err.message}`); 
+                    stopGPSWatch();
+                },
+                { 
+                    enableHighAccuracy: true, // 強制要求高精度 (GPS 晶片)
+                    maximumAge: 0,            // 不要用舊的快取
+                    timeout: 10000            // 10 秒超時
+                }
+            );
+        }
+
+        // 獨立出更新使用者圖示的函數 (小藍點)
+        function updateUserMarker(lat, lng) {
+            if (!userMarker) {
+                const userIcon = L.divIcon({ className: 'user-marker', iconSize: [16, 16] });
+                userMarker = L.marker([lat, lng], {icon: userIcon, zIndexOffset: 1000}).addTo(map);
+            } else {
+                userMarker.setLatLng([lat, lng]);
+            }
+        }
+
+        // 【新增】只更新當前選中消防栓的距離 (不重抓資料庫)
+        async function updateLiveDistance() {
+            if (!currentSelectedHydrant || !lastUserLat || !lastUserLng) return;
+
+            const h = currentSelectedHydrant;
             
-            // 每次搜尋前，清空之前的路線與資料
+            // 1. 重算直線距離 (瞬間完成)
+            h.straightDistance = map.distance([lastUserLat, lastUserLng], [h.latitude, h.longitude]);
+
+            // 2. 如果目前是街道模式，要重新呼叫 HF 引擎算路徑
+            if (!isStraightLineMode) {
+                const osrmData = await getOSRMRoute(lastUserLng, lastUserLat, h.longitude, h.latitude);
+                if (osrmData) {
+                    h.streetDistance = osrmData.distance;
+                    h.streetRoute = osrmData.geometry;
+                }
+            }
+
+            // 更新卡片數字和地圖上的線條
+            showCard(h);
+            drawRouteLine(h);
+        }
+
+        // 原始的抓資料庫邏輯 (幾乎沒變)
+        async function processLocation(lat, lng, radius) {
             if(routeLayer) map.removeLayer(routeLayer);
             document.getElementById('hydrant-card').style.display = 'none';
-            
-            if(userMarker) map.removeLayer(userMarker);
-            userMarker = L.marker([lat, lng]).addTo(map).bindPopup("起火點/我的位置").openPopup();
-            map.setView([lat, lng], 16); 
+            map.setView([lat, lng], 17); // 拉近一點看
 
             const { data: hydrants, error } = await supabaseClient.rpc('search_nearby_hydrants', {
-                user_lat: lat,
-                user_lng: lng,
-                radius_meters: radius
+                user_lat: lat, user_lng: lng, radius_meters: radius
             });
 
             if (error || !hydrants || hydrants.length === 0) {
-                if(radius === 200) {
-                    setStatus("200m 內無消防栓，自動擴大至 300m...");
-                    return processLocation(lat, lng, 300); 
-                }
+                if(radius === 200) return processLocation(lat, lng, 300); 
                 return setStatus("此範圍內查無可用消防栓");
             }
 
-            setStatus(`找到 ${hydrants.length} 支，正在請求路線資料...`);
-
-            currentHydrantsData = []; // 清空舊陣列
-            
+            currentHydrantsData = []; 
             for (let h of hydrants) {
-                // 1. 計算純直線距離
                 h.straightDistance = map.distance([lat, lng], [h.latitude, h.longitude]);
-                
-                // 2. 請求 OSRM 街道距離與「畫線座標(geometry)」
                 const osrmData = await getOSRMRoute(lng, lat, h.longitude, h.latitude);
-                
-                if (osrmData !== null) {
+                if (osrmData) {
                     h.streetDistance = osrmData.distance;
-                    h.streetRoute = osrmData.geometry; // GeoJSON 格式的線條
+                    h.streetRoute = osrmData.geometry;
                 } else {
-                    // 萬一 API 壞掉的防呆，直接退回直線距離
                     h.streetDistance = h.straightDistance;
                     h.streetRoute = null;
                 }
                 currentHydrantsData.push(h);
             }
 
-            // 根據目前模式進行排序與渲染
             updateRender();
             
-            if (currentHydrantsData.length > 0) {
-                setStatus("計算完成！點擊地圖標記查看路線與詳細資訊。");
-                if (currentHydrantsData[0][getActiveDistanceKey()] <= 100) {
-                    map.setZoom(18); 
-                    // 自動觸發點擊第一支消防栓的動作
-                    showCard(currentHydrantsData[0]);
-                    drawRouteLine(currentHydrantsData[0]);
-                }
-            } else {
-                setStatus("無法計算路徑");
+            if (currentHydrantsData.length > 0 && currentHydrantsData[0][getActiveDistanceKey()] <= 100) {
+                currentSelectedHydrant = currentHydrantsData[0];
+                showCard(currentSelectedHydrant);
+                drawRouteLine(currentSelectedHydrant);
             }
         }
 
-        // ==========================================
-        // 4. API 呼叫與畫線邏輯
-        // ==========================================
-
         async function getOSRMRoute(startLng, startLat, endLng, endLat) {
             try {
-                // 🛑 把原本的 /driving/ 改成 /foot/
+                // 🛑 記得確認你後端 HF 是否有改成 foot.lua，如果沒有，請把這裡改回 driving
                 const url = `${HF_OSRM_URL}/route/v1/foot/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
                 const res = await fetch(url);
                 const data = await res.json();
                 if(data.code === 'Ok') {
-                    return {
-                        distance: data.routes[0].distance,
-                        geometry: data.routes[0].geometry
-                    };
+                    return { distance: data.routes[0].distance, geometry: data.routes[0].geometry };
                 }
                 return null;
             } catch (e) { return null; }
         }
 
         function drawRouteLine(h) {
-            // 清除上一條線
             if (routeLayer) map.removeLayer(routeLayer);
+            if (!lastUserLat || !lastUserLng) return;
 
             if (isStraightLineMode) {
-                // 畫直線 (藍色虛線)
-                const userLatLng = userMarker.getLatLng();
-                const hydrantLatLng = [h.latitude, h.longitude];
-                routeLayer = L.polyline([userLatLng, hydrantLatLng], {
-                    color: '#1e88e5', 
-                    weight: 4, 
-                    dashArray: '10, 10' // 虛線效果
+                routeLayer = L.polyline([[lastUserLat, lastUserLng], [h.latitude, h.longitude]], {
+                    color: '#1e88e5', weight: 4, dashArray: '10, 10'
                 }).addTo(map);
             } else {
-                // 畫 OSRM 街道線 (紅色實線)
                 if (h.streetRoute) {
                     routeLayer = L.geoJSON(h.streetRoute, {
                         style: { color: '#e53935', weight: 5, opacity: 0.8 }
@@ -267,23 +324,14 @@
             }
         }
 
-        // ==========================================
-        // 5. UI 切換與渲染邏輯
-        // ==========================================
-
-        // 按下按鈕時觸發模式切換
         window.toggleDistanceMode = function() {
-            isStraightLineMode = !isStraightLineMode; // 反轉布林值
-            
-            // 更新按鈕外觀
+            isStraightLineMode = !isStraightLineMode; 
             const btn = document.getElementById('toggleModeBtn');
             btn.innerText = isStraightLineMode ? "🔄 目前模式：純直線跨越" : "🔄 目前模式：實際街道距離";
-            btn.style.backgroundColor = isStraightLineMode ? "#f57c00" : "#8e24aa"; // 橘色 vs 紫色
+            btn.style.backgroundColor = isStraightLineMode ? "#f57c00" : "#8e24aa"; 
             
-            // 重新排序並重劃地圖上的標記
             if (currentHydrantsData.length > 0) {
                 updateRender();
-                // 如果畫面上已經有打開卡片，立即更新那張卡片的資訊與線條
                 if (currentSelectedHydrant) {
                     showCard(currentSelectedHydrant);
                     drawRouteLine(currentSelectedHydrant);
@@ -291,18 +339,12 @@
             }
         };
 
-        // 取得當前模式應該用的距離變數名稱
-        function getActiveDistanceKey() {
-            return isStraightLineMode ? 'straightDistance' : 'streetDistance';
-        }
+        function getActiveDistanceKey() { return isStraightLineMode ? 'straightDistance' : 'streetDistance'; }
 
-        // 負責依照距離排序並把大頭針畫上去
         function updateRender() {
             const distKey = getActiveDistanceKey();
-            // 重新排序
             currentHydrantsData.sort((a, b) => a[distKey] - b[distKey]);
 
-            // 清除舊標記
             currentMarkers.forEach(m => map.removeLayer(m));
             currentMarkers = [];
 
@@ -316,26 +358,21 @@
 
                 const marker = L.marker([h.latitude, h.longitude], {icon: customIcon}).addTo(map);
                 
-                // 點擊事件
                 marker.on('click', () => {
-                    currentSelectedHydrant = h; // 記錄目前看的是哪一支
+                    currentSelectedHydrant = h; 
                     showCard(h);
-                    drawRouteLine(h); // 畫出對應的路線
-                    map.setView([h.latitude, h.longitude], 18);
+                    drawRouteLine(h); 
                 });
-
                 currentMarkers.push(marker);
             });
         }
         
-        // 更新下方資訊卡片
         function showCard(h) {
             document.getElementById('hydrant-card').style.display = 'block';
             document.getElementById('cardName').innerText = h.name || '未知名稱';
             document.getElementById('cardAddress').innerText = h.address || '無地址資訊';
             document.getElementById('cardType').innerText = h.status || '堪用';
             
-            // 根據模式顯示對應的字眼與數值
             const distKey = getActiveDistanceKey();
             const currentDist = h[distKey];
             
@@ -344,7 +381,6 @@
             document.getElementById('cardDistLabel').innerText = isStraightLineMode ? "直線" : "街道";
             document.getElementById('cardDist').innerText = `${currentDist.toFixed(1)} 米`;
 
-            // 計算水帶 (一條 20m)
             const baseHose = Math.ceil(currentDist / 20);
             const remainder = currentDist % 20;
             let advice = "(建議預備一條)";
@@ -353,9 +389,7 @@
             document.getElementById('cardHose').innerText = `${baseHose} + 1 條\n(${currentDist.toFixed(1)}米/20，${advice})`;
         }
 
-        function setStatus(text) {
-            document.getElementById('statusText').innerText = text;
-        }
+        function setStatus(text) { document.getElementById('statusText').innerText = text; }
     </script>
 </body>
 </html>
