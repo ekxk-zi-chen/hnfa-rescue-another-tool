@@ -1,180 +1,625 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>DJI 搜救航線優化轉檔</title>
+    <title>DJI 搜救航線優化與截斷工具</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
     <style>
-        :root { --primary: #ff9800; --bg: #1a1a1a; --card: #2d2d2d; --text: #eee; }
-        body { font-family: -apple-system, sans-serif; background: var(--bg); color: var(--text); padding: 15px; }
-        .card { background: var(--card); padding: 25px; border-radius: 15px; border: 2px solid var(--primary); box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-        h2 { color: var(--primary); margin: 0 0 10px 0; text-align: center; }
-        .warning { background: #442222; border-left: 5px solid #ff4444; padding: 10px; font-size: 0.85em; margin-bottom: 20px; color: #ffcccc; }
-        .setting { margin-bottom: 20px; }
-        label { display: block; margin-bottom: 8px; font-weight: bold; }
-        input[type="file"] { background: #3d3d3d; width: 100%; padding: 10px; border-radius: 8px; border: 1px dashed #666; color: white; }
-        input[type="number"] { background: white; color: black; font-size: 1.1em; }
-        
-        .btn-calc { background: var(--primary); color: #000; border: none; padding: 15px; border-radius: 10px; cursor: pointer; width: 100%; font-size: 1.1em; font-weight: bold; transition: 0.2s; }
-        .btn-export { background: #4caf50; color: white; border: none; padding: 15px; border-radius: 10px; cursor: pointer; width: 100%; font-size: 1.1em; font-weight: bold; transition: 0.2s; margin-top: 15px; display: none; }
-        button:active { transform: scale(0.98); opacity: 0.8; }
-        
-        .result-box { margin-top: 20px; padding: 15px; background: #333; border-radius: 8px; display: none; text-align: center; }
-        .highlight { color: #ff9800; font-size: 1.3em; font-weight: bold; }
-        small { color: #888; display: block; margin-top: 4px; }
+        :root {
+            --primary: #ff9800;
+            --bg: #1a1a1a;
+            --card: #2d2d2d;
+            --text: #eee;
+        }
+
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, sans-serif;
+        }
+
+        /* 地圖滿版 */
+        #map {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* 懸浮呼叫按鈕 */
+        #togglePanelBtn {
+            position: absolute;
+            bottom: 25px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            padding: 12px 24px;
+            border-radius: 30px;
+            background: var(--primary);
+            color: #000;
+            font-weight: bold;
+            font-size: 1.1em;
+            border: none;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        #togglePanelBtn:active {
+            transform: translate(-50%, 2px);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+        }
+
+        /* 控制面板容器 (底部抽屜樣式) */
+        .controls-container {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            z-index: 1001;
+            transform: translateY(120%);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            justify-content: center;
+            pointer-events: none;
+        }
+
+        .controls-container.active {
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+
+        /* 面板本體 */
+        .card {
+            width: 100%;
+            max-width: 500px;
+            max-height: 85vh;
+            overflow-y: auto;
+            background: var(--card);
+            padding: 20px;
+            border-radius: 20px 20px 0 0;
+            box-shadow: 0 -4px 25px rgba(0, 0, 0, 0.7);
+            border-top: 2px solid var(--primary);
+            box-sizing: border-box;
+        }
+
+        /* 面板頭部 */
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .panel-header h2 {
+            color: var(--primary);
+            margin: 0;
+            font-size: 1.3em;
+        }
+
+        #closePanelBtn {
+            background: transparent;
+            border: none;
+            color: #aaa;
+            font-size: 1.8em;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+
+        .warning {
+            background: #442222;
+            border-left: 5px solid #ff4444;
+            padding: 10px;
+            font-size: 0.85em;
+            margin-bottom: 20px;
+            color: #ffcccc;
+            border-radius: 4px;
+        }
+
+        .setting {
+            margin-bottom: 15px;
+            background: #383838;
+            padding: 12px;
+            border-radius: 8px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #ccc;
+        }
+
+        input[type="file"],
+        select {
+            width: 100%;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #555;
+            background: #222;
+            color: white;
+            box-sizing: border-box;
+            font-size: 1em;
+        }
+
+        input[type="number"] {
+            background: white;
+            color: black;
+            font-size: 1.1em;
+            width: 100%;
+            padding: 10px;
+            border-radius: 5px;
+            border: none;
+            box-sizing: border-box;
+        }
+
+        .btn-clip {
+            background: #17a2b8;
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            width: 100%;
+            font-size: 1em;
+            font-weight: bold;
+            margin-top: 5px;
+            transition: 0.2s;
+        }
+
+        .btn-calc {
+            background: var(--primary);
+            color: #000;
+            border: none;
+            padding: 15px;
+            border-radius: 10px;
+            cursor: pointer;
+            width: 100%;
+            font-size: 1.1em;
+            font-weight: bold;
+            transition: 0.2s;
+            margin-top: 10px;
+        }
+
+        .btn-export {
+            background: #4caf50;
+            color: white;
+            border: none;
+            padding: 15px;
+            border-radius: 10px;
+            cursor: pointer;
+            width: 100%;
+            font-size: 1.1em;
+            font-weight: bold;
+            transition: 0.2s;
+            margin-top: 15px;
+            display: none;
+        }
+
+        button:active {
+            transform: scale(0.98);
+            opacity: 0.8;
+        }
+
+        button:disabled {
+            background: #555;
+            color: #888;
+            cursor: not-allowed;
+        }
+
+        .result-box {
+            margin-top: 15px;
+            padding: 15px;
+            background: #222;
+            border-radius: 8px;
+            display: none;
+            text-align: center;
+            border: 1px solid #444;
+        }
+
+        .highlight {
+            color: #ff9800;
+            font-size: 1.3em;
+            font-weight: bold;
+        }
+
+        small {
+            color: #aaa;
+            display: block;
+            margin-top: 6px;
+            font-size: 0.85em;
+        }
+
+        /* 修正 Leaflet 圖層切換器在暗色背景下的樣式 */
+        .leaflet-control-layers {
+            background: #2d2d2d;
+            color: #eee;
+            border: 2px solid #555 !important;
+            border-radius: 8px;
+        }
+
+        .leaflet-control-layers-expanded {
+            padding: 10px;
+        }
+
+        .leaflet-control-layers-list label {
+            color: #eee;
+            font-weight: normal;
+            margin-bottom: 5px;
+            cursor: pointer;
+        }
+
+        /* 自定義航點標籤樣式 */
+        .wpt-label {
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid var(--primary);
+            color: var(--primary);
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+        }
+
+        /* 去掉 Tooltip 的箭頭 (可選) */
+        .leaflet-tooltip-top:before,
+        .leaflet-tooltip-bottom:before,
+        .leaflet-tooltip-left:before,
+        .leaflet-tooltip-right:before {
+            display: none !important;
+        }
     </style>
 </head>
+
 <body>
 
-<div class="card">
-    <h2>🛸 DJI 航線轉檔器</h2>
-    <div class="warning">
-        ⚠️ <b>注意：</b> 本工具生成的 KML 僅供「地圖參考」，請勿在 DJI APP 中點擊「開始執行」自動航線。
+    <div id="map"></div>
+    <button id="togglePanelBtn">⚙️ 開啟設定面板</button>
+
+    <div class="controls-container" id="controlPanel">
+        <div class="card">
+            <div class="panel-header">
+                <h2>🛸 航線優化與截斷</h2>
+                <button id="closePanelBtn">×</button>
+            </div>
+
+            <div class="warning">
+                ⚠️ <b>注意：</b> 本工具生成的 KML 僅供「地圖參考」，請勿在 DJI APP 中點擊「開始執行」自動航線。
+            </div>
+
+            <div class="setting">
+                <label>📁 1. 選擇 GPX 檔案</label>
+                <input type="file" id="fileInput" accept=".gpx">
+            </div>
+
+            <div class="setting" id="clipSection" style="opacity: 0.5; pointer-events: none;">
+                <label>✂️ 2. 軌跡截斷 (可選)</label>
+                <select id="westPoint" style="margin-bottom: 10px;">
+                    <option>等待載入航點...</option>
+                </select>
+                <select id="eastPoint" style="margin-bottom: 10px;">
+                    <option>等待載入航點...</option>
+                </select>
+                <button id="clipBtn" class="btn-clip" disabled onclick="executeClip()">執行截斷</button>
+            </div>
+
+            <div class="setting">
+                <label>⚙️ 3. 抽稀靈敏度</label>
+                <input type="number" id="epsilon" value="0.0005" step="0.0001">
+                <small>數字越大點越少。0.0005 = 約 50m 誤差</small>
+            </div>
+
+            <button id="calcBtn" class="btn-calc" onclick="calculatePoints()" disabled>計算並預覽點數</button>
+
+            <div id="resultBox" class="result-box">
+                <div id="statusText"></div>
+            </div>
+
+            <button id="exportBtn" class="btn-export" onclick="exportKML()">點數滿意！分享 / 匯出</button>
+        </div>
     </div>
-    
-    <div class="setting">
-        <label>1. 選擇 GPX 檔案</label>
-        <input type="file" id="fileInput" accept=".gpx">
-    </div>
 
-    <div class="setting">
-        <label>2. 抽稀靈敏度</label>
-        <input type="number" id="epsilon" value="0.0005" step="0.0001" style="width: 100%; padding: 10px; border-radius: 5px; border:none;">
-        <small>數字越大點越少。0.0005 = 約 50m 誤差</small>
-    </div>
+    <script>
+        const panel = document.getElementById('controlPanel');
+        const toggleBtn = document.getElementById('togglePanelBtn');
+        const closeBtn = document.getElementById('closePanelBtn');
 
-    <button id="calcBtn" class="btn-calc" onclick="calculatePoints()">1. 計算並預覽點數</button>
+        panel.classList.add('active');
+        toggleBtn.style.display = 'none';
 
-    <div id="resultBox" class="result-box">
-        <div id="statusText"></div>
-    </div>
+        toggleBtn.addEventListener('click', () => {
+            panel.classList.add('active');
+            toggleBtn.style.display = 'none';
+        });
 
-    <button id="exportBtn" class="btn-export" onclick="exportKML()">2. 點數滿意！分享 / 匯出</button>
-</div>
+        closeBtn.addEventListener('click', () => {
+            panel.classList.remove('active');
+            toggleBtn.style.display = 'block';
+        });
 
-<script>
-    // 全域變數，用來暫存準備要匯出的檔案資料
-    let readyKmlFile = null;
-    let readyFileName = "";
-    let readyBlob = null;
+        // --- 地圖初始化與圖層設定 ---
 
-    // 如果使用者重新選檔案或改數字，就隱藏匯出按鈕，強迫重新計算
-    document.getElementById('fileInput').addEventListener('change', resetUI);
-    document.getElementById('epsilon').addEventListener('input', resetUI);
+        // 1. OSM 預設底圖
+        const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap', maxZoom: 19
+        });
 
-    function resetUI() {
-        document.getElementById('exportBtn').style.display = 'none';
-        document.getElementById('resultBox').style.display = 'none';
-        readyKmlFile = null;
-    }
+        // 2. 內政部通用版電子地圖 (穩定備案)
+        const nlscLayer = L.tileLayer('https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{z}/{y}/{x}', {
+            attribution: '© 內政部國土測繪中心', maxZoom: 19
+        });
 
-    // --- 步驟一：讀取檔案與計算 ---
-    async function calculatePoints() {
-        const fileInput = document.getElementById('fileInput');
-        const epsilon = parseFloat(document.getElementById('epsilon').value);
-        const resultBox = document.getElementById('resultBox');
-        const statusText = document.getElementById('statusText');
-        const exportBtn = document.getElementById('exportBtn');
+        const map = L.map('map', {
+            zoomControl: false,
+            layers: [osmLayer] // 預設開啟 OSM
+        }).setView([23.5, 121], 7);
 
-        if (!fileInput.files.length) { alert("請先選擇 GPX 檔案！"); return; }
-        
-        statusText.innerHTML = "⏳ 計算中...";
-        resultBox.style.display = 'block';
-        exportBtn.style.display = 'none';
-        
-        const file = fileInput.files[0];
+        L.control.zoom({ position: 'topright' }).addTo(map);
 
-        try {
+        // 加入圖層切換控制器
+        const baseMaps = {
+            "OpenStreetMap (預設)": osmLayer,
+            "內政部電子地圖": nlscLayer
+        };
+        L.control.layers(baseMaps, null, { position: 'topright' }).addTo(map);
+
+        let mapTrackLayer = null;
+        let mapWaypointLayers = L.layerGroup().addTo(map);
+
+        let originalWaypoints = [];
+        let originalTrackCoords = [];
+        let currentTrackCoords = [];
+        let originalFileName = "track";
+
+        let readyKmlFile = null;
+        let readyFileName = "";
+        let readyBlob = null;
+
+        document.getElementById('fileInput').addEventListener('change', handleFileUpload);
+        document.getElementById('epsilon').addEventListener('input', resetExportUI);
+
+        function resetExportUI() {
+            document.getElementById('exportBtn').style.display = 'none';
+            document.getElementById('resultBox').style.display = 'none';
+            readyKmlFile = null;
+        }
+
+        function getDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3;
+            const φ1 = lat1 * Math.PI / 180;
+            const φ2 = lat2 * Math.PI / 180;
+            const Δφ = (lat2 - lat1) * Math.PI / 180;
+            const Δλ = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+            return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+        }
+
+        async function handleFileUpload(e) {
+            resetExportUI();
+            const file = e.target.files[0];
+            if (!file) return;
+
+            originalFileName = file.name.replace('.gpx', '');
             const content = await file.text();
             const parser = new DOMParser();
             const xmlDoc = parser.parseFromString(content, "text/xml");
-            let coords = [];
-            const trkpts = xmlDoc.getElementsByTagName("trkpt");
-            
+
+            const wptNodes = xmlDoc.querySelectorAll('wpt');
+            originalWaypoints = Array.from(wptNodes).map((node, index) => {
+                const nameNode = node.querySelector('name');
+                return {
+                    id: index,
+                    lat: parseFloat(node.getAttribute('lat')),
+                    lon: parseFloat(node.getAttribute('lon')),
+                    name: nameNode ? nameNode.textContent : `航點 ${index + 1}`
+                };
+            });
+
+            const trkpts = xmlDoc.querySelectorAll("trkpt");
+            originalTrackCoords = [];
             for (let i = 0; i < trkpts.length; i++) {
-                const lat = trkpts[i].getAttribute("lat");
-                const lon = trkpts[i].getAttribute("lon");
+                const lat = parseFloat(trkpts[i].getAttribute("lat"));
+                const lon = parseFloat(trkpts[i].getAttribute("lon"));
                 const ele = trkpts[i].getElementsByTagName("ele")[0]?.textContent || "0";
-                coords.push({lon, lat, ele});
+                originalTrackCoords.push({ lat, lon, ele });
             }
 
-            if (!coords.length) { 
-                statusText.innerHTML = "❌ 檔案內無效的 GPX 軌跡"; 
-                return; 
+            if (originalTrackCoords.length === 0) {
+                alert("檔案內無效的軌跡資料");
+                return;
             }
 
-            // 智慧抽稀演算法
-            let simplified = [coords[0]];
-            for (let i = 1; i < coords.length; i++) {
-                const last = simplified[simplified.length - 1];
-                const curr = coords[i];
-                const dist = Math.sqrt(Math.pow(curr.lon - last.lon, 2) + Math.pow(curr.lat - last.lat, 2));
-                if (dist > epsilon) simplified.push(curr);
+            currentTrackCoords = [...originalTrackCoords];
+
+            updateMap(currentTrackCoords, originalWaypoints);
+            setupClipUI();
+            document.getElementById('calcBtn').disabled = false;
+
+            setTimeout(() => {
+                panel.classList.remove('active');
+                toggleBtn.style.display = 'block';
+            }, 500);
+        }
+
+        function updateMap(trackCoords, waypoints) {
+            if (mapTrackLayer) map.removeLayer(mapTrackLayer);
+            mapWaypointLayers.clearLayers();
+
+            const latlngs = trackCoords.map(p => [p.lat, p.lon]);
+            mapTrackLayer = L.polyline(latlngs, { color: '#ff9800', weight: 4 }).addTo(map);
+
+            waypoints.forEach(wpt => {
+                L.marker([wpt.lat, wpt.lon])
+                    // 關鍵修改：使用 bindTooltip 並設定為 permanent (永久顯示)
+                    .bindTooltip(wpt.name, {
+                        permanent: true,       // 永久顯示，不需點擊
+                        direction: 'top',      // 顯示在標記上方
+                        className: 'wpt-label',// 套用上面寫的 CSS
+                        offset: [0, -10]       // 稍微向上偏移，避免擋住座標點
+                    })
+                    .addTo(mapWaypointLayers);
+            });
+
+            if (latlngs.length > 0) {
+                map.fitBounds(mapTrackLayer.getBounds(), { paddingBottomRight: [0, 100] });
             }
-            if (coords.length > 1) simplified.push(coords[coords.length-1]);
+        }
+        function setupClipUI() {
+            const westSelect = document.getElementById('westPoint');
+            const eastSelect = document.getElementById('eastPoint');
+            const clipSection = document.getElementById('clipSection');
+            const clipBtn = document.getElementById('clipBtn');
 
-            // 準備 KML 內容
-            const coordStr = simplified.map(c => `${c.lon},${c.lat},${c.ele}`).join("\n");
-            const kmlBody = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>DJI_READY</name><Style id="s"><LineStyle><color>ff00ffff</color><width>6</width></LineStyle></Style><Placemark><name>⚠️手動參考線(勿點執行)</name><styleUrl>#s</styleUrl><LineString><tessellate>1</tessellate><altitudeMode>clampToGround</altitudeMode><coordinates>${coordStr}</coordinates></LineString></Placemark></Document></kml>`;
+            westSelect.innerHTML = '';
+            eastSelect.innerHTML = '';
 
-            readyFileName = `DJI_REF_${file.name.replace('.gpx','')}.kml`;
-            readyBlob = new Blob([kmlBody], {type: 'application/vnd.google-earth.kml+xml'});
-            readyKmlFile = new File([readyBlob], readyFileName, { type: "application/vnd.google-earth.kml+xml" });
+            if (originalWaypoints.length < 2) {
+                westSelect.innerHTML = '<option>航點數量不足</option>';
+                eastSelect.innerHTML = '<option>航點數量不足</option>';
+                return;
+            }
 
-            // 顯示計算結果，提示使用者
-            statusText.innerHTML = `
-                原始點數：${coords.length} 點<br>
+            originalWaypoints.forEach(wpt => {
+                const opt1 = document.createElement('option');
+                opt1.value = wpt.id; opt1.textContent = wpt.name;
+                westSelect.appendChild(opt1);
+
+                const opt2 = document.createElement('option');
+                opt2.value = wpt.id; opt2.textContent = wpt.name;
+                eastSelect.appendChild(opt2);
+            });
+
+            eastSelect.selectedIndex = 1;
+
+            clipSection.style.opacity = '1';
+            clipSection.style.pointerEvents = 'auto';
+            clipBtn.disabled = false;
+        }
+
+        function executeClip() {
+            const westId = parseInt(document.getElementById('westPoint').value);
+            const eastId = parseInt(document.getElementById('eastPoint').value);
+
+            if (westId === eastId) { alert('兩端點位不能相同！'); return; }
+
+            const wptWest = originalWaypoints.find(w => w.id === westId);
+            const wptEast = originalWaypoints.find(w => w.id === eastId);
+
+            let westTrkIndex = findClosestTrackPoint(wptWest.lat, wptWest.lon);
+            let eastTrkIndex = findClosestTrackPoint(wptEast.lat, wptEast.lon);
+
+            const startIndex = Math.min(westTrkIndex, eastTrkIndex);
+            const endIndex = Math.max(westTrkIndex, eastTrkIndex);
+
+            currentTrackCoords = originalTrackCoords.slice(startIndex, endIndex + 1);
+
+            updateMap(currentTrackCoords, originalWaypoints);
+            resetExportUI();
+
+            panel.classList.remove('active');
+            toggleBtn.style.display = 'block';
+        }
+
+        function findClosestTrackPoint(lat, lon) {
+            let minDist = Infinity;
+            let closestIdx = -1;
+            originalTrackCoords.forEach((pt, idx) => {
+                const dist = getDistance(lat, lon, pt.lat, pt.lon);
+                if (dist < minDist) { minDist = dist; closestIdx = idx; }
+            });
+            return closestIdx;
+        }
+
+        function calculatePoints() {
+            const epsilon = parseFloat(document.getElementById('epsilon').value);
+            const resultBox = document.getElementById('resultBox');
+            const statusText = document.getElementById('statusText');
+            const exportBtn = document.getElementById('exportBtn');
+
+            if (currentTrackCoords.length === 0) return;
+
+            statusText.innerHTML = "⏳ 計算中...";
+            resultBox.style.display = 'block';
+            exportBtn.style.display = 'none';
+
+            try {
+                let simplified = [currentTrackCoords[0]];
+                for (let i = 1; i < currentTrackCoords.length; i++) {
+                    const last = simplified[simplified.length - 1];
+                    const curr = currentTrackCoords[i];
+                    const dist = Math.sqrt(Math.pow(curr.lon - last.lon, 2) + Math.pow(curr.lat - last.lat, 2));
+                    if (dist > epsilon) simplified.push(curr);
+                }
+                if (currentTrackCoords.length > 1) simplified.push(currentTrackCoords[currentTrackCoords.length - 1]);
+
+                const coordStr = simplified.map(c => `${c.lon},${c.lat},${c.ele}`).join("\n");
+                const kmlBody = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>DJI_READY</name><Style id="s"><LineStyle><color>ff00ffff</color><width>6</width></LineStyle></Style><Placemark><name>⚠️手動參考線(勿點執行)</name><styleUrl>#s</styleUrl><LineString><tessellate>1</tessellate><altitudeMode>clampToGround</altitudeMode><coordinates>${coordStr}</coordinates></LineString></Placemark></Document></kml>`;
+
+                readyFileName = `DJI_REF_${originalFileName}.kml`;
+                readyBlob = new Blob([kmlBody], { type: 'application/vnd.google-earth.kml+xml' });
+                readyKmlFile = new File([readyBlob], readyFileName, { type: "application/vnd.google-earth.kml+xml" });
+
+                statusText.innerHTML = `
+                處理前點數：${currentTrackCoords.length} 點<br>
                 壓縮後剩餘：<span class="highlight">${simplified.length}</span> 點<br>
                 <small style="margin-top:10px; color:#aaa;">(若覺得點數太多，請調大靈敏度後再次點擊計算)</small>
             `;
-            
-            // 顯示第二步的分享按鈕
-            exportBtn.style.display = 'block';
 
-        } catch (error) {
-            console.error(error);
-            statusText.innerHTML = "❌ 計算失敗: " + error.message;
-        }
-    }
+                exportBtn.style.display = 'block';
 
-    // --- 步驟二：觸發分享面板 (Safari 最愛這種乾淨的同步點擊) ---
-    async function exportKML() {
-        if (!readyKmlFile) return;
-        
-        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-        const statusText = document.getElementById('statusText');
-
-        // 手機端優先使用原生分享面板
-        if (isMobile && navigator.share && navigator.canShare && navigator.canShare({ files: [readyKmlFile] })) {
-            try {
-                await navigator.share({
-                    files: [readyKmlFile],
-                    title: "匯出 DJI 航線",
-                    text: "DJI 參考航線檔案"
-                });
-                statusText.innerHTML += "<br><span style='color:#4caf50;'>✅ 已成功喚起分享面板！</span>";
-                return;
-            } catch (err) {
-                if (err.name === 'AbortError') {
-                    // 使用者自己按了取消分享，不算錯誤
-                    return;
-                }
-                console.warn("分享面板呼叫失敗，改用傳統下載:", err);
+            } catch (error) {
+                console.error(error);
+                statusText.innerHTML = "❌ 計算失敗: " + error.message;
             }
         }
 
-        // 桌機版或手機分享失敗的備用下載方案
-        const url = URL.createObjectURL(readyBlob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = readyFileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        
-        statusText.innerHTML += "<br><span style='color:#4caf50;'>✅ 檔案已下載！</span>";
-    }
-</script>
+        async function exportKML() {
+            if (!readyKmlFile) return;
+
+            const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+            const statusText = document.getElementById('statusText');
+
+            if (isMobile && navigator.share && navigator.canShare && navigator.canShare({ files: [readyKmlFile] })) {
+                try {
+                    await navigator.share({
+                        files: [readyKmlFile],
+                        title: "匯出 DJI 航線",
+                        text: "DJI 參考航線檔案"
+                    });
+                    statusText.innerHTML += "<br><span style='color:#4caf50;'>✅ 已成功喚起分享面板！</span>";
+                    return;
+                } catch (err) {
+                    if (err.name === 'AbortError') return;
+                    console.warn("分享面板呼叫失敗，改用傳統下載:", err);
+                }
+            }
+
+            const url = URL.createObjectURL(readyBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = readyFileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            statusText.innerHTML += "<br><span style='color:#4caf50;'>✅ 檔案已下載！</span>";
+        }
+    </script>
 </body>
+
 </html>
